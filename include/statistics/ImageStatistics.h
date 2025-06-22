@@ -56,21 +56,66 @@ namespace ImageCompression {
         double calculateEntropy(const Rectangle& region) const;
         
         /**
+         * @brief Optimized entropy calculation using pre-allocated buffer
+         * @param region The rectangular region to analyze
+         * @param histogramBuffer Pre-allocated buffer to avoid allocations
+         * @return Entropy value for the region
+         */
+        double calculateEntropyOptimized(const Rectangle& region, std::vector<int>& histogramBuffer) const;
+        
+        /**
          * @brief Builds a hue histogram for a rectangular region
          * @param region The rectangular region
          * @return Vector containing hue frequency distribution
          */
         std::vector<int> buildHueHistogram(const Rectangle& region) const;
         
-    private:
-        // Cumulative sum arrays for efficient rectangle queries
-        std::vector<std::vector<double>> cumulativeHueX_;  // cos(hue) values
-        std::vector<std::vector<double>> cumulativeHueY_;  // sin(hue) values  
-        std::vector<std::vector<double>> cumulativeSaturation_;
-        std::vector<std::vector<double>> cumulativeLuminance_;
+        /**
+         * @brief Optimized histogram building using pre-allocated buffer
+         * @param region The rectangular region
+         * @param histogramBuffer Pre-allocated buffer to avoid allocations
+         */
+        void buildHueHistogramOptimized(const Rectangle& region, std::vector<int>& histogramBuffer) const;
         
-        // 3D array: [width][height][hue_bin] for hue histograms
-        std::vector<std::vector<std::vector<int>>> cumulativeHueHistogram_;
+    private:
+        // Flat arrays for efficient memory access (row-major order)
+        std::vector<double> cumulativeHueX_;     // size: width * height
+        std::vector<double> cumulativeHueY_;     // size: width * height
+        std::vector<double> cumulativeSaturation_; // size: width * height
+        std::vector<double> cumulativeLuminance_;  // size: width * height
+        
+        // Flat 3D array: [width * height * HUE_BINS] for hue histograms
+        std::vector<int> cumulativeHueHistogram_;  // size: width * height * HUE_BINS
+        
+        // Pre-computed trigonometry lookup tables for performance
+        static std::vector<double> cosLookup_;
+        static std::vector<double> sinLookup_;
+        static bool lookupTablesInitialized_;
+        
+        // Helper functions for flat array indexing
+        inline size_t getIndex(int x, int y) const {
+            return static_cast<size_t>(y) * imageWidth_ + x;
+        }
+        
+        inline size_t getHistogramIndex(int x, int y, int bin) const {
+            return (static_cast<size_t>(y) * imageWidth_ + x) * HUE_BINS + bin;
+        }
+        
+        // Initialize trigonometry lookup tables (called once)
+        static void initializeLookupTables();
+        
+        // Fast trigonometry using lookup tables
+        inline double fastCos(double hue) const {
+            int index = static_cast<int>(hue) % 360;
+            if (index < 0) index += 360;
+            return cosLookup_[index];
+        }
+        
+        inline double fastSin(double hue) const {
+            int index = static_cast<int>(hue) % 360;
+            if (index < 0) index += 360;
+            return sinLookup_[index];
+        }
         
         /**
          * @brief Helper function to subtract two histogram vectors

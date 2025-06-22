@@ -7,9 +7,9 @@
 #   make install   - Install to /usr/local/bin (requires sudo)
 
 CXX = g++
-CXXFLAGS = -std=c++17 -Wall -Wextra -O2 -g
+CXXFLAGS = -std=c++17 -Wall -Wextra -O3 -march=native -flto -DNDEBUG -ffast-math -funroll-loops
 INCLUDES = -Iinclude
-LDFLAGS =
+LDFLAGS = -flto -O3
 
 # Directories
 SRC_DIR = src

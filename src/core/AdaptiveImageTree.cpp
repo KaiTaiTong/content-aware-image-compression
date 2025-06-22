@@ -48,6 +48,12 @@ namespace ImageCompression {
             return currentNode;
         }
         
+        // Early termination: if region has very low entropy (uniform color), don't split
+        double regionEntropy = statistics.calculateEntropy(region);
+        if (regionEntropy < 0.1) {  // Very uniform region
+            return currentNode;
+        }
+        
         // Find optimal split for this region
         auto splitResult = findOptimalSplit(statistics, region);
         Rectangle leftRegion = splitResult.first;
@@ -72,9 +78,39 @@ namespace ImageCompression {
         int regionHeight = region.lowerRight.second - region.upperLeft.second + 1;
         long totalArea = statistics.getArea(region);
         
-        // Try horizontal splits
+        // Smart sampling: only test a subset of split positions for large regions
+        // This reduces complexity from O(width+height) to O(log(width+height))
+        auto getSplitCandidates = [](int start, int end, int maxCandidates = 8) {
+            std::vector<int> candidates;
+            if (end - start <= maxCandidates) {
+                // Small region: test all positions
+                for (int i = start; i < end; ++i) {
+                    candidates.push_back(i);
+                }
+            } else {
+                // Large region: sample key positions
+                candidates.push_back(start + (end - start) / 4);     // 25%
+                candidates.push_back(start + (end - start) / 3);     // 33%
+                candidates.push_back(start + (end - start) / 2);     // 50%
+                candidates.push_back(start + 2 * (end - start) / 3); // 67%
+                candidates.push_back(start + 3 * (end - start) / 4); // 75%
+                
+                // Add a few random positions for variety
+                int step = std::max(1, (end - start) / 10);
+                for (int i = start + step; i < end; i += step) {
+                    if (candidates.size() < maxCandidates) {
+                        candidates.push_back(i);
+                    }
+                }
+            }
+            return candidates;
+        };
+        
+        // Try horizontal splits with smart sampling
         if (regionHeight > 1) {
-            for (int splitY = region.upperLeft.second; splitY < region.lowerRight.second; ++splitY) {
+            auto splitCandidates = getSplitCandidates(region.upperLeft.second, region.lowerRight.second);
+            
+            for (int splitY : splitCandidates) {
                 Rectangle topRegion(region.upperLeft.first, region.upperLeft.second,
                                    region.lowerRight.first, splitY);
                 Rectangle bottomRegion(region.upperLeft.first, splitY + 1,
@@ -95,9 +131,11 @@ namespace ImageCompression {
             }
         }
         
-        // Try vertical splits
+        // Try vertical splits with smart sampling
         if (regionWidth > 1) {
-            for (int splitX = region.upperLeft.first; splitX < region.lowerRight.first; ++splitX) {
+            auto splitCandidates = getSplitCandidates(region.upperLeft.first, region.lowerRight.first);
+            
+            for (int splitX : splitCandidates) {
                 Rectangle leftRegion(region.upperLeft.first, region.upperLeft.second,
                                     splitX, region.lowerRight.second);
                 Rectangle rightRegion(splitX + 1, region.upperLeft.second,

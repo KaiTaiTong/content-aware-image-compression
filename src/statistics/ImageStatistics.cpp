@@ -5,33 +5,51 @@
 
 namespace ImageCompression {
 
+    // Static member definitions
+    std::vector<double> ImageStatistics::cosLookup_;
+    std::vector<double> ImageStatistics::sinLookup_;
+    bool ImageStatistics::lookupTablesInitialized_ = false;
+
+    void ImageStatistics::initializeLookupTables() {
+        if (lookupTablesInitialized_) return;
+        
+        cosLookup_.resize(360);
+        sinLookup_.resize(360);
+        
+        for (int i = 0; i < 360; ++i) {
+            double radians = i * PI / 180.0;
+            cosLookup_[i] = std::cos(radians);
+            sinLookup_[i] = std::sin(radians);
+        }
+        
+        lookupTablesInitialized_ = true;
+    }
+
     ImageStatistics::ImageStatistics(const Utils::PNG& image) 
         : imageWidth_(image.getWidth()), imageHeight_(image.getHeight()) {
         
-        // Initialize cumulative arrays
-        cumulativeHueX_.resize(imageWidth_);
-        cumulativeHueY_.resize(imageWidth_);
-        cumulativeSaturation_.resize(imageWidth_);
-        cumulativeLuminance_.resize(imageWidth_);
-        cumulativeHueHistogram_.resize(imageWidth_);
+        // Initialize lookup tables once
+        initializeLookupTables();
         
-        for (int x = 0; x < imageWidth_; ++x) {
-            cumulativeHueX_[x].resize(imageHeight_);
-            cumulativeHueY_[x].resize(imageHeight_);
-            cumulativeSaturation_[x].resize(imageHeight_);
-            cumulativeLuminance_[x].resize(imageHeight_);
-            cumulativeHueHistogram_[x].resize(imageHeight_);
-            
-            for (int y = 0; y < imageHeight_; ++y) {
-                cumulativeHueHistogram_[x][y].resize(HUE_BINS, 0);
+        // Pre-allocate flat arrays
+        size_t totalPixels = static_cast<size_t>(imageWidth_) * imageHeight_;
+        cumulativeHueX_.resize(totalPixels);
+        cumulativeHueY_.resize(totalPixels);
+        cumulativeSaturation_.resize(totalPixels);
+        cumulativeLuminance_.resize(totalPixels);
+        cumulativeHueHistogram_.resize(totalPixels * HUE_BINS, 0);
+        
+        // Build cumulative arrays using flat indexing
+        for (int y = 0; y < imageHeight_; ++y) {
+            for (int x = 0; x < imageWidth_; ++x) {
+                size_t currentIndex = getIndex(x, y);
                 
                 // Get current pixel
                 const Utils::HSLAPixel* currentPixel = image.getPixel(x, y);
                 
-                // Convert hue to cartesian coordinates for circular averaging
-                double hueRadians = currentPixel->hue * PI / 180.0;
-                double currentHueX = currentPixel->saturation * std::cos(hueRadians);
-                double currentHueY = currentPixel->saturation * std::sin(hueRadians);
+                // Convert hue to cartesian coordinates using fast lookup
+                double currentHueX = currentPixel->saturation * fastCos(currentPixel->hue);
+                double currentHueY = currentPixel->saturation * fastSin(currentPixel->hue);
                 
                 // Calculate cumulative values
                 double cumulativeX = currentHueX;
@@ -40,49 +58,71 @@ namespace ImageCompression {
                 double cumulativeL = currentPixel->luminance;
                 
                 // Initialize histogram for current position
-                std::vector<int> currentHistogram(HUE_BINS, 0);
                 int hueBinIndex = static_cast<int>(currentPixel->hue / 10.0);
-                hueBinIndex = std::min(hueBinIndex, HUE_BINS - 1); // Clamp to valid range
-                currentHistogram[hueBinIndex] = 1;
+                hueBinIndex = std::min(hueBinIndex, HUE_BINS - 1);
                 
                 // Add contributions from neighboring cumulative regions
                 if (x > 0 && y > 0) {
                     // Interior case: add top, left, subtract top-left
-                    cumulativeX += cumulativeHueX_[x-1][y] + cumulativeHueX_[x][y-1] - cumulativeHueX_[x-1][y-1];
-                    cumulativeY += cumulativeHueY_[x-1][y] + cumulativeHueY_[x][y-1] - cumulativeHueY_[x-1][y-1];
-                    cumulativeS += cumulativeSaturation_[x-1][y] + cumulativeSaturation_[x][y-1] - cumulativeSaturation_[x-1][y-1];
-                    cumulativeL += cumulativeLuminance_[x-1][y] + cumulativeLuminance_[x][y-1] - cumulativeLuminance_[x-1][y-1];
+                    size_t leftIndex = getIndex(x-1, y);
+                    size_t topIndex = getIndex(x, y-1);
+                    size_t topLeftIndex = getIndex(x-1, y-1);
                     
-                    currentHistogram = addHistograms(cumulativeHueHistogram_[x-1][y], cumulativeHueHistogram_[x][y-1]);
-                    currentHistogram = subtractHistograms(currentHistogram, cumulativeHueHistogram_[x-1][y-1]);
-                    currentHistogram[hueBinIndex]++;
+                    cumulativeX += cumulativeHueX_[leftIndex] + cumulativeHueX_[topIndex] - cumulativeHueX_[topLeftIndex];
+                    cumulativeY += cumulativeHueY_[leftIndex] + cumulativeHueY_[topIndex] - cumulativeHueY_[topLeftIndex];
+                    cumulativeS += cumulativeSaturation_[leftIndex] + cumulativeSaturation_[topIndex] - cumulativeSaturation_[topLeftIndex];
+                    cumulativeL += cumulativeLuminance_[leftIndex] + cumulativeLuminance_[topIndex] - cumulativeLuminance_[topLeftIndex];
+                    
+                    // Update histogram in-place (no vector copying!)
+                    for (int bin = 0; bin < HUE_BINS; ++bin) {
+                        size_t histIndex = getHistogramIndex(x, y, bin);
+                        size_t leftHistIndex = getHistogramIndex(x-1, y, bin);
+                        size_t topHistIndex = getHistogramIndex(x, y-1, bin);
+                        size_t topLeftHistIndex = getHistogramIndex(x-1, y-1, bin);
+                        
+                        cumulativeHueHistogram_[histIndex] = cumulativeHueHistogram_[leftHistIndex] 
+                                                           + cumulativeHueHistogram_[topHistIndex] 
+                                                           - cumulativeHueHistogram_[topLeftHistIndex];
+                    }
+                    cumulativeHueHistogram_[getHistogramIndex(x, y, hueBinIndex)]++;
+                    
                 } else if (x > 0) {
                     // Left edge: add from left
-                    cumulativeX += cumulativeHueX_[x-1][y];
-                    cumulativeY += cumulativeHueY_[x-1][y];
-                    cumulativeS += cumulativeSaturation_[x-1][y];
-                    cumulativeL += cumulativeLuminance_[x-1][y];
+                    size_t leftIndex = getIndex(x-1, y);
+                    cumulativeX += cumulativeHueX_[leftIndex];
+                    cumulativeY += cumulativeHueY_[leftIndex];
+                    cumulativeS += cumulativeSaturation_[leftIndex];
+                    cumulativeL += cumulativeLuminance_[leftIndex];
                     
-                    currentHistogram = cumulativeHueHistogram_[x-1][y];
-                    currentHistogram[hueBinIndex]++;
+                    for (int bin = 0; bin < HUE_BINS; ++bin) {
+                        cumulativeHueHistogram_[getHistogramIndex(x, y, bin)] = 
+                            cumulativeHueHistogram_[getHistogramIndex(x-1, y, bin)];
+                    }
+                    cumulativeHueHistogram_[getHistogramIndex(x, y, hueBinIndex)]++;
+                    
                 } else if (y > 0) {
                     // Top edge: add from above
-                    cumulativeX += cumulativeHueX_[x][y-1];
-                    cumulativeY += cumulativeHueY_[x][y-1];
-                    cumulativeS += cumulativeSaturation_[x][y-1];
-                    cumulativeL += cumulativeLuminance_[x][y-1];
+                    size_t topIndex = getIndex(x, y-1);
+                    cumulativeX += cumulativeHueX_[topIndex];
+                    cumulativeY += cumulativeHueY_[topIndex];
+                    cumulativeS += cumulativeSaturation_[topIndex];
+                    cumulativeL += cumulativeLuminance_[topIndex];
                     
-                    currentHistogram = cumulativeHueHistogram_[x][y-1];
-                    currentHistogram[hueBinIndex]++;
+                    for (int bin = 0; bin < HUE_BINS; ++bin) {
+                        cumulativeHueHistogram_[getHistogramIndex(x, y, bin)] = 
+                            cumulativeHueHistogram_[getHistogramIndex(x, y-1, bin)];
+                    }
+                    cumulativeHueHistogram_[getHistogramIndex(x, y, hueBinIndex)]++;
+                } else {
+                    // Top-left corner: just set the current pixel's histogram
+                    cumulativeHueHistogram_[getHistogramIndex(x, y, hueBinIndex)] = 1;
                 }
-                // else: top-left corner, use initialized values
                 
                 // Store cumulative values
-                cumulativeHueX_[x][y] = cumulativeX;
-                cumulativeHueY_[x][y] = cumulativeY;
-                cumulativeSaturation_[x][y] = cumulativeS;
-                cumulativeLuminance_[x][y] = cumulativeL;
-                cumulativeHueHistogram_[x][y] = currentHistogram;
+                cumulativeHueX_[currentIndex] = cumulativeX;
+                cumulativeHueY_[currentIndex] = cumulativeY;
+                cumulativeSaturation_[currentIndex] = cumulativeS;
+                cumulativeLuminance_[currentIndex] = cumulativeL;
             }
         }
     }
@@ -100,32 +140,42 @@ namespace ImageCompression {
         
         if (ulX == 0 && ulY == 0) {
             // Region starts at origin
-            totalHueX = cumulativeHueX_[lrX][lrY];
-            totalHueY = cumulativeHueY_[lrX][lrY];
-            totalSaturation = cumulativeSaturation_[lrX][lrY];
-            totalLuminance = cumulativeLuminance_[lrX][lrY];
+            size_t lrIndex = getIndex(lrX, lrY);
+            totalHueX = cumulativeHueX_[lrIndex];
+            totalHueY = cumulativeHueY_[lrIndex];
+            totalSaturation = cumulativeSaturation_[lrIndex];
+            totalLuminance = cumulativeLuminance_[lrIndex];
         } else if (ulX == 0) {
             // Region on left edge
-            totalHueX = cumulativeHueX_[lrX][lrY] - cumulativeHueX_[lrX][ulY-1];
-            totalHueY = cumulativeHueY_[lrX][lrY] - cumulativeHueY_[lrX][ulY-1];
-            totalSaturation = cumulativeSaturation_[lrX][lrY] - cumulativeSaturation_[lrX][ulY-1];
-            totalLuminance = cumulativeLuminance_[lrX][lrY] - cumulativeLuminance_[lrX][ulY-1];
+            size_t lrIndex = getIndex(lrX, lrY);
+            size_t topIndex = getIndex(lrX, ulY-1);
+            totalHueX = cumulativeHueX_[lrIndex] - cumulativeHueX_[topIndex];
+            totalHueY = cumulativeHueY_[lrIndex] - cumulativeHueY_[topIndex];
+            totalSaturation = cumulativeSaturation_[lrIndex] - cumulativeSaturation_[topIndex];
+            totalLuminance = cumulativeLuminance_[lrIndex] - cumulativeLuminance_[topIndex];
         } else if (ulY == 0) {
             // Region on top edge
-            totalHueX = cumulativeHueX_[lrX][lrY] - cumulativeHueX_[ulX-1][lrY];
-            totalHueY = cumulativeHueY_[lrX][lrY] - cumulativeHueY_[ulX-1][lrY];
-            totalSaturation = cumulativeSaturation_[lrX][lrY] - cumulativeSaturation_[ulX-1][lrY];
-            totalLuminance = cumulativeLuminance_[lrX][lrY] - cumulativeLuminance_[ulX-1][lrY];
+            size_t lrIndex = getIndex(lrX, lrY);
+            size_t leftIndex = getIndex(ulX-1, lrY);
+            totalHueX = cumulativeHueX_[lrIndex] - cumulativeHueX_[leftIndex];
+            totalHueY = cumulativeHueY_[lrIndex] - cumulativeHueY_[leftIndex];
+            totalSaturation = cumulativeSaturation_[lrIndex] - cumulativeSaturation_[leftIndex];
+            totalLuminance = cumulativeLuminance_[lrIndex] - cumulativeLuminance_[leftIndex];
         } else {
             // Interior region
-            totalHueX = cumulativeHueX_[lrX][lrY] - cumulativeHueX_[ulX-1][lrY] 
-                       - cumulativeHueX_[lrX][ulY-1] + cumulativeHueX_[ulX-1][ulY-1];
-            totalHueY = cumulativeHueY_[lrX][lrY] - cumulativeHueY_[ulX-1][lrY] 
-                       - cumulativeHueY_[lrX][ulY-1] + cumulativeHueY_[ulX-1][ulY-1];
-            totalSaturation = cumulativeSaturation_[lrX][lrY] - cumulativeSaturation_[ulX-1][lrY] 
-                             - cumulativeSaturation_[lrX][ulY-1] + cumulativeSaturation_[ulX-1][ulY-1];
-            totalLuminance = cumulativeLuminance_[lrX][lrY] - cumulativeLuminance_[ulX-1][lrY] 
-                            - cumulativeLuminance_[lrX][ulY-1] + cumulativeLuminance_[ulX-1][ulY-1];
+            size_t lrIndex = getIndex(lrX, lrY);
+            size_t leftIndex = getIndex(ulX-1, lrY);
+            size_t topIndex = getIndex(lrX, ulY-1);
+            size_t topLeftIndex = getIndex(ulX-1, ulY-1);
+            
+            totalHueX = cumulativeHueX_[lrIndex] - cumulativeHueX_[leftIndex] 
+                       - cumulativeHueX_[topIndex] + cumulativeHueX_[topLeftIndex];
+            totalHueY = cumulativeHueY_[lrIndex] - cumulativeHueY_[leftIndex] 
+                       - cumulativeHueY_[topIndex] + cumulativeHueY_[topLeftIndex];
+            totalSaturation = cumulativeSaturation_[lrIndex] - cumulativeSaturation_[leftIndex] 
+                             - cumulativeSaturation_[topIndex] + cumulativeSaturation_[topLeftIndex];
+            totalLuminance = cumulativeLuminance_[lrIndex] - cumulativeLuminance_[leftIndex] 
+                            - cumulativeLuminance_[topIndex] + cumulativeLuminance_[topLeftIndex];
         }
         
         // Calculate averages
@@ -155,6 +205,12 @@ namespace ImageCompression {
         return calculateEntropyFromDistribution(histogram, area);
     }
 
+    double ImageStatistics::calculateEntropyOptimized(const Rectangle& region, std::vector<int>& histogramBuffer) const {
+        buildHueHistogramOptimized(region, histogramBuffer);
+        long area = getArea(region);
+        return calculateEntropyFromDistribution(histogramBuffer, area);
+    }
+
     std::vector<int> ImageStatistics::buildHueHistogram(const Rectangle& region) const {
         assert(isValidRectangle(region));
         
@@ -166,21 +222,75 @@ namespace ImageCompression {
         std::vector<int> histogram(HUE_BINS, 0);
         
         if (ulX == 0 && ulY == 0) {
-            histogram = cumulativeHueHistogram_[lrX][lrY];
+            // Region starts at origin
+            for (int bin = 0; bin < HUE_BINS; ++bin) {
+                histogram[bin] = cumulativeHueHistogram_[getHistogramIndex(lrX, lrY, bin)];
+            }
         } else if (ulX == 0) {
-            histogram = subtractHistograms(cumulativeHueHistogram_[lrX][lrY], 
-                                         cumulativeHueHistogram_[lrX][ulY-1]);
+            // Region on left edge
+            for (int bin = 0; bin < HUE_BINS; ++bin) {
+                histogram[bin] = cumulativeHueHistogram_[getHistogramIndex(lrX, lrY, bin)] 
+                               - cumulativeHueHistogram_[getHistogramIndex(lrX, ulY-1, bin)];
+            }
         } else if (ulY == 0) {
-            histogram = subtractHistograms(cumulativeHueHistogram_[lrX][lrY], 
-                                         cumulativeHueHistogram_[ulX-1][lrY]);
+            // Region on top edge
+            for (int bin = 0; bin < HUE_BINS; ++bin) {
+                histogram[bin] = cumulativeHueHistogram_[getHistogramIndex(lrX, lrY, bin)] 
+                               - cumulativeHueHistogram_[getHistogramIndex(ulX-1, lrY, bin)];
+            }
         } else {
-            histogram = cumulativeHueHistogram_[lrX][lrY];
-            histogram = subtractHistograms(histogram, cumulativeHueHistogram_[ulX-1][lrY]);
-            histogram = subtractHistograms(histogram, cumulativeHueHistogram_[lrX][ulY-1]);
-            histogram = addHistograms(histogram, cumulativeHueHistogram_[ulX-1][ulY-1]);
+            // Interior region
+            for (int bin = 0; bin < HUE_BINS; ++bin) {
+                histogram[bin] = cumulativeHueHistogram_[getHistogramIndex(lrX, lrY, bin)]
+                               - cumulativeHueHistogram_[getHistogramIndex(ulX-1, lrY, bin)]
+                               - cumulativeHueHistogram_[getHistogramIndex(lrX, ulY-1, bin)]
+                               + cumulativeHueHistogram_[getHistogramIndex(ulX-1, ulY-1, bin)];
+            }
         }
         
         return histogram;
+    }
+
+    void ImageStatistics::buildHueHistogramOptimized(const Rectangle& region, std::vector<int>& histogramBuffer) const {
+        assert(isValidRectangle(region));
+        
+        // Ensure buffer is the right size and clear it
+        if (histogramBuffer.size() != HUE_BINS) {
+            histogramBuffer.resize(HUE_BINS);
+        }
+        std::fill(histogramBuffer.begin(), histogramBuffer.end(), 0);
+        
+        int ulX = region.upperLeft.first;
+        int ulY = region.upperLeft.second;
+        int lrX = region.lowerRight.first;
+        int lrY = region.lowerRight.second;
+        
+        if (ulX == 0 && ulY == 0) {
+            // Region starts at origin
+            for (int bin = 0; bin < HUE_BINS; ++bin) {
+                histogramBuffer[bin] = cumulativeHueHistogram_[getHistogramIndex(lrX, lrY, bin)];
+            }
+        } else if (ulX == 0) {
+            // Region on left edge
+            for (int bin = 0; bin < HUE_BINS; ++bin) {
+                histogramBuffer[bin] = cumulativeHueHistogram_[getHistogramIndex(lrX, lrY, bin)] 
+                                     - cumulativeHueHistogram_[getHistogramIndex(lrX, ulY-1, bin)];
+            }
+        } else if (ulY == 0) {
+            // Region on top edge
+            for (int bin = 0; bin < HUE_BINS; ++bin) {
+                histogramBuffer[bin] = cumulativeHueHistogram_[getHistogramIndex(lrX, lrY, bin)] 
+                                     - cumulativeHueHistogram_[getHistogramIndex(ulX-1, lrY, bin)];
+            }
+        } else {
+            // Interior region
+            for (int bin = 0; bin < HUE_BINS; ++bin) {
+                histogramBuffer[bin] = cumulativeHueHistogram_[getHistogramIndex(lrX, lrY, bin)]
+                                     - cumulativeHueHistogram_[getHistogramIndex(ulX-1, lrY, bin)]
+                                     - cumulativeHueHistogram_[getHistogramIndex(lrX, ulY-1, bin)]
+                                     + cumulativeHueHistogram_[getHistogramIndex(ulX-1, ulY-1, bin)];
+            }
+        }
     }
 
     std::vector<int> ImageStatistics::subtractHistograms(const std::vector<int>& first, 
