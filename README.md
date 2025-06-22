@@ -10,6 +10,16 @@ This project solves the challenge of **intelligent image compression** by:
 - Automatically detecting high-entropy regions (complex details) and preserving them
 - Compressing low-entropy regions (uniform areas) more aggressively
 
+| Raw Input | Q = 0.7 | Q = 0.5 | Q = 0.4 | Q = 0.3 | Q = 0.2 |
+|:----------:|:----------:|:----------:|:----------:|:----------:|:----------:|
+| ![example1](./demo/input/example1.png) | ![example1_07](./demo/output/example1_q0.70.png)  | ![example1_05](./demo/output/example1_q0.50.png)  | ![example1_04](./demo/output/example1_q0.40.png)  | ![example1_03](./demo/output/example1_q0.30.png)  | ![example1_02](./demo/output/example1_q0.20.png)
+
+Other examples:
+|  |  |  |  |
+|:------------:|:------------:|:------------:|:------------:|
+| ![example2_04](./demo/output/example2_q0.40.png) | ![example3_04](./demo/output/example3_q0.40.png) | ![example5_02](./demo/output/example5_q0.20.png) | ![example6_07](./demo/output/example6_q0.70.png) |
+
+
 ## How to Run
 
 ### Setup & Installation
