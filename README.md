@@ -10,13 +10,13 @@ This project solves the challenge of **intelligent image compression** by:
 - Automatically detecting high-entropy regions (complex details) and preserving them
 - Compressing low-entropy regions (uniform areas) more aggressively
 
-| Raw Input | Q = 0.7 | Q = 0.5 | Q = 0.4 | Q = 0.3 | Q = 0.2 |
-|:----------:|:----------:|:----------:|:----------:|:----------:|:----------:|
-| ![example1](./demo/input/example1.png) | ![example1_07](./demo/output/example1_q0.70.png)  | ![example1_05](./demo/output/example1_q0.50.png)  | ![example1_04](./demo/output/example1_q0.40.png)  | ![example1_03](./demo/output/example1_q0.30.png)  | ![example1_02](./demo/output/example1_q0.20.png)
+|               Raw Input                |                     Q = 0.7                      |                     Q = 0.5                      |                     Q = 0.4                      |                     Q = 0.3                      |                     Q = 0.2                      |
+| :------------------------------------: | :----------------------------------------------: | :----------------------------------------------: | :----------------------------------------------: | :----------------------------------------------: | :----------------------------------------------: |
+| ![example1](./demo/input/example1.png) | ![example1_07](./demo/output/example1_q0.70.png) | ![example1_05](./demo/output/example1_q0.50.png) | ![example1_04](./demo/output/example1_q0.40.png) | ![example1_03](./demo/output/example1_q0.30.png) | ![example1_02](./demo/output/example1_q0.20.png) |
 
 Other examples:
-|  |  |  |  |
-|:------------:|:------------:|:------------:|:------------:|
+|                                                  |                                                  |                                                  |                                                  |
+| :----------------------------------------------: | :----------------------------------------------: | :----------------------------------------------: | :----------------------------------------------: |
 | ![example2_04](./demo/output/example2_q0.40.png) | ![example3_04](./demo/output/example3_q0.40.png) | ![example5_02](./demo/output/example5_q0.20.png) | ![example6_07](./demo/output/example6_q0.70.png) |
 
 
@@ -47,18 +47,22 @@ make clean && make
 
 ### Output Results
 ```
-Found 3 PNG file(s) to compress
-Quality: 0.75
+Found 6 PNG file(s) to compress
+Quality: 0.30 (medium)
 Output directory: ./compressed
 
-Processing: photo1.png -> photo1_q0.75.png ... ✓ (2.3% compression, 12.4s)
-Processing: photo2.png -> photo2_q0.75.png ... ✓ (1.8% compression, 8.7s)
-Processing: photo3.png -> photo3_q0.75.png ... ✓ (3.1% compression, 15.2s)
+Processing: example6.png -> example6_q0.30.png ... ✓ (0.1% compression, 0.43s)
+Processing: example5.png -> example5_q0.30.png ... ✓ (2.0% compression, 1.30s)
+Processing: example4.png -> example4_q0.30.png ... ✓ (0.5% compression, 0.34s)
+Processing: example1.png -> example1_q0.30.png ... ✓ (0.1% compression, 0.31s)
+Processing: example3.png -> example3_q0.30.png ... ✓ (0.2% compression, 0.70s)
+Processing: example2.png -> example2_q0.30.png ... ✓ (0.2% compression, 0.54s)
 
 === Compression Summary ===
-Files processed: 3/3
-Total processing time: 36.3 seconds
-Average compression ratio: 2.4%
+Files processed: 6/6
+Total processing time: 3.62 seconds
+Average compression ratio: 0.6%
+Average time per image: 0.60 seconds
 ```
 
 ### Requirements
@@ -68,13 +72,13 @@ Average compression ratio: 2.4%
 
 ## Quality Scale Meaning
 
-| Quality Range | Description | Use Case |
-|---------------|-------------|----------|
-| `0.0 - 0.2` | Maximum compression | Thumbnails, previews |
-| `0.3 - 0.4` | Aggressive compression | Web optimization |
-| `0.5 - 0.6` | Balanced (default: 0.5) | General purpose |
-| `0.7 - 0.8` | High quality | Professional images |
-| `0.9 - 1.0` | Minimal compression | Archival quality |
+| Quality Range | Description             | Use Case             |
+| ------------- | ----------------------- | -------------------- |
+| `0.0 - 0.2`   | Maximum compression     | Thumbnails, previews |
+| `0.3 - 0.4`   | Aggressive compression  | Web optimization     |
+| `0.5 - 0.6`   | Balanced (default: 0.5) | General purpose      |
+| `0.7 - 0.8`   | High quality            | Professional images  |
+| `0.9 - 1.0`   | Minimal compression     | Archival quality     |
 
 ## Project Structure
 
